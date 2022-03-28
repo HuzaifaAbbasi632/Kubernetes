@@ -1,0 +1,191 @@
+-------------------------------------------------------Install Docker RHEL/CentOS/Ubuntu-start-------------------------------------------------------
+
+sudo apt-get update && sudo apt-get upgrade -y (Ubuntu)
+
+sudo yum update && sudo yum upgrade (RHEL/CentOS)
+
+***********************Ubuntu***********************
+sudo apt-get update
+
+sudo apt-get install -y \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    gnupg-agent \
+    software-properties-common
+
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+
+sudo add-apt-repository \
+   "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+   $(lsb_release -cs) \
+   stable"
+
+sudo apt-get update
+
+sudo apt-get install docker-ce docker-ce-cli containerd.io -y
+
+sudo service docker start
+
+***********************RHEL/CentOS***********************
+sudo yum install -y yum-utils
+
+sudo yum-config-manager \
+    --add-repo \
+    https://download.docker.com/linux/centos/docker-ce.repo
+
+sudo yum install docker-ce docker-ce-cli containerd.io
+
+sudo systemctl start docker
+
+sudo systemctl enable docker
+-------------------------------------------------------Install Docker RHEL/CentOS/Ubuntu-end-------------------------------------------------------
+
+----------------------------------------------------Install Kubernetes RHEL/CentOS/Ubuntu-start---------------------------------------------------
+
+***********************Ubuntu***********************
+
+swapoff -a 
+
+apt-get update && apt-get install -y apt-transport-https curl
+
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+
+cat <<EOF >/etc/apt/sources.list.d/kubernetes.list
+deb https://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+
+apt-get update
+apt-get install -y kubelet kubeadm kubectl
+
+***********************RHEL/CentOS***********************
+
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
+
+sudo yum install -y kubelet kubeadm kubectl
+
+systemctl enable kubelet
+
+systemctl start kubelet
+
+----------------------------------------------------Install Kubernetes RHEL/CentOS/Ubuntu-end---------------------------------------------------
+
+----------------------------------------------------Install RHEL/CentOS/Ubuntu System Configuration---------------------------------------------------
+
+#Change hostname for identification
+
+sudo hostnamectl set-hostname master-node
+
+sudo hostnamectl set-hostname worker-node1
+
+#For Host identification in local server
+
+sudo vi /etc/hosts (And define host here)
+
+192.168.1.10 master.phoenixnap.com master-node
+192.168.1.20 node1. phoenixnap.com node1 worker-node
+
+#Either disbale firewalld or allow these ports in firewalld
+#Master-node
+sudo firewall-cmd --permanent --add-port=6443/tcp
+sudo firewall-cmd --permanent --add-port=2379-2380/tcp
+sudo firewall-cmd --permanent --add-port=10250/tcp
+sudo firewall-cmd --permanent --add-port=10251/tcp
+sudo firewall-cmd --permanent --add-port=10252/tcp
+sudo firewall-cmd --permanent --add-port=10255/tcp
+sudo firewall-cmd --reload
+
+#Worker-node
+sudo firewall-cmd --permanent --add-port=10251/tcp
+sudo firewall-cmd --permanent --add-port=10255/tcp
+firewall-cmd --reload
+
+cat <<EOF > /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+sysctl --system
+
+sudo setenforce 0
+
+sudo sed -i ‘s/^SELINUX=enforcing$/SELINUX=permissive/’ /etc/selinux/config
+
+sudo sed -i '/swap/d' /etc/fstab
+
+sudo swapoff -a
+
+#Single-master-node configuration
+sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+
+#For Master-node
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+#Multi-master-node needs a Loadbalancer at the start which can be nginx or HAproxy
+
+-------------------------------------------------------Install HAproxy RHEL/CentOS/Ubuntu-start-------------------------------------------------------
+
+***********************Ubuntu***********************
+
+sudo apt-get update && sudo apt-get upgrade -y
+
+sudo apt-get install haproxy -y
+
+***********************RHEL/CentOS***********************
+
+sudo yum install haproxy
+sudo systemctl start haproxy
+sudo systemctl enable haproxy
+
+***********************Configuration***********************
+vi /etc/haproxy/haproxy.cfg
+
+frontend fe-apiserver
+   bind 0.0.0.0:6443
+   mode tcp
+   option tcplog
+   default_backend be-apiserver
+
+backend be-apiserver
+   mode tcp
+   option tcplog
+   option tcp-check
+   balance roundrobin
+   default-server inter 10s downinter 5s rise 2 fall 2 slowstart 60s maxconn 250 maxqueue 256 weight 100
+
+       server master1 10.138.0.15:6443 check
+       server master2 10.138.0.16:6443 check
+
+systemctl restart haproxy
+
+systemctl status haproxy
+
+#For verification
+nc -v localhost 6443
+Connection to localhost 6443 port [tcp/*] succeeded!
+
+#Initiate cluster from master-node with this command with loadbalancer or IP of your loadbalancer
+
+kubeadm init --control-plane-endpoint "loadbalancer:6443" --upload-certs --pod-network-cidr=192.168.0.0/16 
+
+mkdir -p $HOME/.kube
+  sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+#Configuration for loadbalancer
+mkdir -p $HOME/.kube
+scp master1:/etc/kubernetes/admin.conf $HOME/.kube/config
+chown $(id -u):$(id -g) $HOME/.kube/config
+snap install kubectl --classic
+#To verify the control on loadbalancer type following command 
+kubectl get nodes 
+ 

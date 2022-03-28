@@ -1,0 +1,9 @@
+kubectl get svc
+
+kubectl get pods OR kubectl get pods -o wide
+
+kubectl get deployments
+
+kubectl describe pods podname
+
+kubectl logs podname namespace
